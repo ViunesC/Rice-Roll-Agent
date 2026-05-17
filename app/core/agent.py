@@ -3,8 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from llm import LLMClient
-from config import Config, 
+from core.llm import LLMClient
+from core.config import Config
 
 DEFAULT_SYSTEM_PROMPT="""
 You are a helpful assistant.
