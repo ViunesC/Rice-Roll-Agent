@@ -8,4 +8,5 @@ dependencies = [
     "dotenv>=0.9.9",
     "fastapi>=0.136.1",
     "openai>=2.36.0",
+    "serpapi>=1.0.2",
 ]
