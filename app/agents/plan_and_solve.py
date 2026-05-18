@@ -86,6 +86,7 @@ class PlanAndSolveAgent(Agent):
         enable_tool: bool = True,
         tools: Optional[ToolRegistry] = None,
         max_retries: int = 3,
+        max_steps: int = 5, # TODO: enforce maximum steps in a plan
     ):
         self.name = name
         self.llm = llm
