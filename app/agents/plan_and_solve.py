@@ -22,6 +22,7 @@ Available tools:
 
 Rules:
 - If the task is already clear, produce a plan immediately.
+- You MUST provide a plan with no more than {max_steps} steps.
 - If important information is missing and an available tool can get it, call exactly one tool.
 - Do not solve the task yourself unless the plan would be a single direct answer step.
 - Keep the plan compact, ordered, and specific enough for another agent to execute.
@@ -86,7 +87,7 @@ class PlanAndSolveAgent(Agent):
         enable_tool: bool = True,
         tools: Optional[ToolRegistry] = None,
         max_retries: int = 3,
-        max_steps: int = 5, # TODO: enforce maximum steps in a plan
+        max_steps: int = 5,
     ):
         self.name = name
         self.llm = llm
@@ -101,6 +102,7 @@ class PlanAndSolveAgent(Agent):
         self.config = config or Config.from_env()
         self.enable_tool = enable_tool
         self.max_retries = max_retries
+        self.max_steps = max_steps
 
         if self.enable_tool:
             self.tools = tools
@@ -143,6 +145,7 @@ class PlanAndSolveAgent(Agent):
             tool_description=self.tools.get_tools_description()
             if self.tools
             else "No available tool",
+            max_steps=str(self.max_steps),
             history=self._dump_history(),
         )
 
@@ -188,7 +191,7 @@ class PlanAndSolveAgent(Agent):
                 tool_description=self.tools.get_tools_description()
                 if self.tools
                 else "No available tool",
-                history=self._dump_history()
+                history=self._dump_history(),
             )
 
             if no_inst_given:
