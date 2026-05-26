@@ -10,13 +10,14 @@ serpapi_engines = ["google", "baidu", "bing"]
 
 
 class InternetSearchTool(Tool):
-    def __init__(self):
+    def __init__(self, top_n:int = 5):
         super().__init__(
             name="search_internet",
             description="search internet for given query",
         )
 
         self._client = serpapi.Client(api_key=os.getenv("SERPAPI_API_KEY"))
+        self.top_n = top_n
 
     def run(self, parameters: dict[str, Any]) -> str:
         query = parameters.get("query", None)
@@ -40,7 +41,7 @@ class InternetSearchTool(Tool):
         """Sanitize search result"""
         content = []
 
-        for entry in results:
+        for entry in results[:self.top_n]:
             res_str = f"""
             position: {entry.get("position", "")},
             link: {entry.get("link", "")},
