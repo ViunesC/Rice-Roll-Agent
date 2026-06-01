@@ -3,12 +3,13 @@ from dotenv import load_dotenv
 from agents.trival import TrivalAgent
 from agents.plan_and_solve import PlanAndSolveAgent
 from agents.react import ReActAgent
+from agents.worker_evaluator import WorkerEvaluatorAgent
 from tools.concrete.internet_search import get_registry
 
 load_dotenv()
 
 if __name__ == "__main__":
-    llm_client = LLMClient()
+    llm_client = LLMClient(max_tokens=2048)
 
     # alex = TrivalAgent("Alex", llm_client, tools=get_registry())
     # question = "Could do a little 3-card Tarot prediction on my fortune?"
@@ -27,7 +28,12 @@ if __name__ == "__main__":
     # print("\n", humphrey.run(tool_calling_task))
     # print(humphrey._dump_history())
 
-    jackson = ReActAgent("Jackson", llm_client, tools=get_registry(), max_iterations=8)
-    print("\n", jackson.run(tool_calling_task))
+    # jackson = ReActAgent("Jackson", llm_client, tools=get_registry(), max_iterations=8)
+    # print("\n", jackson.run(tool_calling_task))
+    # print("\n\n ============= Agent history =============")
+    # print(jackson._dump_history())
+
+    old_billy = WorkerEvaluatorAgent("Old Billy", llm_client, tools=get_registry())
+    print("\n", old_billy.run(tool_calling_task))
     print("\n\n ============= Agent history =============")
-    print(jackson._dump_history())
+    print(old_billy._dump_history())
