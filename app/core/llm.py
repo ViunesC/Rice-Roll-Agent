@@ -9,6 +9,8 @@ import os
 from openai import OpenAI
 from typing import Optional, Any, Iterator
 
+from core.message import Message
+
 MODELSCOPE_BASE_URL="https://api-inference.modelscope.cn/v1/"
 OPENAI_BASE_URL="https://api.openai.com/v1"
 ANTHROPIC_BASE_URL="https://api.anthropic.com/v1"
@@ -46,11 +48,13 @@ class LLMClient:
             timeout=self.timeout
         )
 
-    def invoke(self, messages: list[dict[str, Any]], **kwargs) -> str:
+    def invoke(self, messages: list[Message], **kwargs) -> str:
+        # print(f"DEBUG: {messages}")
+
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=[msg.to_dict() for msg in messages],
                 **kwargs
             )
 
