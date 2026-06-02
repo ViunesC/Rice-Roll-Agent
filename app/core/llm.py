@@ -48,7 +48,7 @@ class LLMClient:
             timeout=self.timeout
         )
 
-    def invoke(self, messages: list[Message], **kwargs) -> str:
+    def invoke(self, messages: list[Message], structured_output: bool = False, output_schema: Optional[dict[str, Any]] = None, **kwargs) -> str:
         # print(f"DEBUG: {messages}")
 
         try:
