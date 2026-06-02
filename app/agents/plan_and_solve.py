@@ -5,6 +5,7 @@ from typing import Optional, Any
 from core.agent import Agent
 from core.config import Config
 from core.llm import LLMClient
+from core.message import Message
 from tools.registry import ToolRegistry
 
 
@@ -118,7 +119,7 @@ class PlanAndSolveAgent(Agent):
         else:
             self.tools = None
 
-        self._history: list[dict[str, Any]] = []
+        self._history: list[Message] = []
 
     def run(self, user_input: str, **kwargs) -> str:
         self._history.clear()
@@ -149,7 +150,7 @@ class PlanAndSolveAgent(Agent):
             history=self._dump_history(),
         )
 
-        messages = [{"role": "user", "content": prompt}]
+        messages =  [Message(role="user", content=prompt)]
         self._history.extend(messages)
 
         print(f"🧠 ====Planner {self.name} start to draft a plan.====")
@@ -181,7 +182,7 @@ class PlanAndSolveAgent(Agent):
                     except Exception as e:
                         print(f"Error when calling tool {name}: {e}")
 
-                tool_call_result = [{"role": "tool", "content": result}]
+                tool_call_result = [Message(role="tool", content=result)]
                 self._history.extend(tool_call_result)
             else:
                 no_inst_given = True
@@ -191,22 +192,23 @@ class PlanAndSolveAgent(Agent):
                 tool_description=self.tools.get_tools_description()
                 if self.tools
                 else "No available tool",
-                history=self._dump_history(),
+                max_steps=str(self.max_steps),
+                history=self._dump_history()
             )
 
             if no_inst_given:
                 prompt += "NOTICE: You NEED to either call a tool to get more information or provide a plan in correct format. Please try again."
 
-            messages = [{"role": "user", "content": prompt}]
+            messages = [Message(role="user", content=prompt)]
             self._history.extend(messages)
 
             # print(prompt)
             response = self.llm.invoke(messages, **kwargs)
-            self._history.extend([{"role": "assistant", "content": response}])
+            self._history.extend([Message(role="assistant", content=response)])
 
             i += 1
 
-        self._history.extend([{"role": "assistant", "subagent_type": "planner", "content": response}])
+        self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "planner"})])
         
         # extract plan
         raw_plan = response.split("[PLAN]")[1].split("```")[1].split("```")[0].strip()
@@ -232,11 +234,11 @@ class PlanAndSolveAgent(Agent):
                 else "No available tool",
                 history=self._dump_prev_steps()
             )
-            messages = [{"role": "user", "content": prompt}]
+            messages = [Message(role="user", content=prompt)]
             self._history.extend(messages)
 
             response = self.llm.invoke(messages, **kwargs)
-            self._history.extend([{"role": "assistant", "subagent_type": "solver", "content": response}])
+            self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "solver"})])
 
             j = 0
             while "[TOOL]" in response and j < self.max_retries:
@@ -260,7 +262,7 @@ class PlanAndSolveAgent(Agent):
                     except Exception as e:
                         print(f"Error when calling tool {name}: {e}")
 
-                tool_call_result = [{"role": "tool", "content": result}]
+                tool_call_result = [Message(role="tool", content=result)]
                 self._history.extend(tool_call_result)
 
                 prompt = self.solver_promopt.format(
@@ -272,19 +274,19 @@ class PlanAndSolveAgent(Agent):
                     history=self._dump_prev_steps()
                 )
 
-                messages = [{"role": "user", "content": prompt}]
+                messages = [Message(role="user", content=prompt)]
 
                 # print(prompt)
 
                 self._history.extend(messages)
                 response = self.llm.invoke(messages, **kwargs)
-                self._history.extend([{"role": "assistant", "subagent_type": "solver", "content": response}])
+                self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "solver"})])
 
                 j += 1
             
             if j == self.max_retries:
                 print("⚠️ Maximum tool call retry amount reached. The final tool call might be incomplete.")
-                self._history.extend([{"role": "tool", "content": "Maximum tool call retry reached. The attempt on previous step might be incomplete/failed."}])
+                self._history.extend([Message(role="tool", content="Maximum tool call retry reached. The attempt on previous step might be incomplete/failed.")])
 
         final_response = response
         
@@ -301,8 +303,8 @@ class PlanAndSolveAgent(Agent):
         entries = []
 
         for i, entry in enumerate(self._history): 
-            if entry["role"] != "user": # discard all system prompts
-                entries.append(f"{i}. {entry['role']}: {entry['content']}")
+            if entry.role != "user": # discard all system prompts
+                entries.append(f"{i}. {entry.role}: {entry.content}")
         
         return "\n".join(entries) if entries else ""
     
@@ -310,9 +312,9 @@ class PlanAndSolveAgent(Agent):
         entries = []
 
         for i, entry in enumerate(self._history): 
-            if entry["role"] == "assistant" and entry.get("subagent_type") == "solver": # discard all system prompts
-                entries.append(f"{i}. {entry['role']}: {entry['content']}")
-            elif entry["role"] == "tool":
-                entries.append(f"{i}. Toolcalling result: {entry['content']}")
+            if entry.role == "assistant" and entry.metadata.get("subagent_type", "") == "solver": # discard all system prompts
+                entries.append(f"{i}. {entry.role}: {entry.content}")
+            elif entry.role == "tool":
+                entries.append(f"{i}. Toolcalling result: {entry.content}")
         
         return "\n".join(entries) if entries else ""

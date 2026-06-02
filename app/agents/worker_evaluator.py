@@ -7,6 +7,8 @@ from typing import Optional, Any
 from core.agent import Agent
 from core.config import Config
 from core.llm import LLMClient
+from core.message import Message
+
 from tools.registry import ToolRegistry
 
 
@@ -121,7 +123,7 @@ class WorkerEvaluatorAgent(Agent):
         else:
             self.tools = None
 
-        self._history: list[dict[str, Any]] = []
+        self._history: list[Message] = []
 
     def run(self, user_input: str, **kwargs) -> str:
         feedback_template = "Your last attempt was evaluated by an expert, and here is the feedback: \n {feedback}"
@@ -164,14 +166,14 @@ class WorkerEvaluatorAgent(Agent):
             feedback=feedback if feedback else ""
         )
 
-        messages = [{"role": "user", "content": prompt}]
+        messages = [Message(role="user", content=prompt)]
         self._history.extend(messages)
 
         i = 0
         response = ""
         while i < self.max_retries:
             response = self.llm.invoke(messages, **kwargs)
-            self._history.extend([{"role": "assistant", "subagent_type": "worker", "content": response}])
+            self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "worker"})])
 
             if "[TOOL]" in response:
                 tool_calling = response.split("[TOOL](")[1].split(")")[0].split(":", 1)
@@ -194,12 +196,12 @@ class WorkerEvaluatorAgent(Agent):
                     except Exception as e:
                         print(f"Error when calling tool {name}: {e}")
 
-                tool_call_result = [{"role": "tool", "content": result}]
+                tool_call_result = [Message(role="tool", content=result)]
                 self._history.extend(tool_call_result)
 
                 if i == self.max_retries - 1:
                     print("⚠️ Maximum tool call retry amount reached. The final tool call might be incomplete.")
-                    self._history.extend([{"role": "tool", "content": "Maximum tool call retry reached. The attempt on previous step might be incomplete/failed."}])
+                    self._history.extend([Message(role="tool", content="Maximum tool call retry reached. The attempt on previous step might be incomplete/failed.")])
 
                 prompt = self.worker_promopt.format(
                     task=task,
@@ -210,7 +212,7 @@ class WorkerEvaluatorAgent(Agent):
                     feedback=feedback if feedback else ""
                 )
 
-                messages = [{"role": "user", "content": prompt}]
+                messages = [Message(role="user", content=prompt)]
                 self._history.extend(messages)
             else:
                 break
@@ -224,11 +226,11 @@ class WorkerEvaluatorAgent(Agent):
             task=task,
             last_attempt=last_attempt
         )
-        messages = [{"role": "user", "content": prompt}]
+        messages = [Message(role="user", content=prompt)]
         self._history.extend(messages)
 
         response = self.llm.invoke(messages, **kwargs)
-        self._history.extend([{"role": "assistant", "subagent_type": "evaluator", "content": response}])
+        self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "evaluator"})])
 
         # TODO: implement structured output in llm client
         raw_output = self._parse_output_payload(response)

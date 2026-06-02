@@ -90,7 +90,7 @@ class ReActAgent(Agent):
         else:
             raise Exception(f"❌ Cannot mount tool to {self.name}. Program exits.")
 
-        self._history: list[dict[str, Any]] = []
+        self._history: list[Message] = []
 
     def run(self, user_input: str, **kwargs) -> str:
         self._history.clear()
@@ -103,7 +103,7 @@ class ReActAgent(Agent):
             else "No available tool",
         )
 
-        messages = [{"role": "user", "content": prompt}]
+        messages = [Message(role="user", content=prompt)]
         self._history.extend(messages)
 
         print(f"💡 === Agent {self.name} start answering problem ===")
@@ -121,8 +121,8 @@ class ReActAgent(Agent):
 
             self._history.extend(
                 [
-                    {"role": "assistant", "react_type": "reasoning", "content": reasoning},
-                    {"role": "assistant", "react_type": "action", "content": reasoning}
+                    Message(role="assistant", content=reasoning, metadata={"react_type":"reasoning"}),
+                    Message(role="assistant", content=action, metadata={"react_type":"action"})
                 ]
             )
 
@@ -152,7 +152,7 @@ class ReActAgent(Agent):
                     except Exception as e:
                         print(f"Error when calling tool {name}: {e}")
 
-                tool_call_result = [{"role": "tool", "react_type": "observation", "content": result}]
+                tool_call_result = [Message(role="tool", content=result, metadata={"react_type": "observation"})]
                 self._history.extend(tool_call_result)
 
             prompt = self.system_prompt.format(
@@ -163,7 +163,7 @@ class ReActAgent(Agent):
                 else "No available tool",
             )
 
-            messages = [{"role": "user", "content": prompt}]
+            messages = [Message(role="user", content=prompt)]
 
             # print(prompt)
             self._history.extend(messages)
@@ -177,7 +177,7 @@ class ReActAgent(Agent):
             print(f"👌 {self.name} have completed execution.")
             final_answer = response.split("[FINAL_ANSWER]")[1]
 
-            self._history.extend([{"role": "assistant", "react_type": "reasoning", "content": final_answer}])
+            self._history.extend([Message(role="assistant", content=final_answer, metadata={"react_type":"reasoning"})])
         else:
             print(
                 f"⚠️ {self.name} have reached maximum number of retries allowed. Response might be incomplete."
@@ -200,7 +200,7 @@ class ReActAgent(Agent):
         entries = []
 
         for i, entry in enumerate(self._history):
-            if entry["role"] != "user":  # discard all system prompts
-                entries.append(f"{i}. {entry['react_type']}: {entry['content']}")
+            if entry.role != "user":  # discard all system prompts
+                entries.append(f"{i}. {entry.metadata.get('react_type', "")}: {entry.content}")
 
         return "\n".join(entries)

@@ -90,7 +90,7 @@ class TrivalAgent(Agent):
         else:
             self.tools = None
 
-        self._history: list[dict[str, Any]] = []
+        self._history: list[Message] = []
 
     def run(self, user_input: str, **kwargs) -> str:
         self._history.clear()
@@ -102,11 +102,18 @@ class TrivalAgent(Agent):
                 tool_description="No available tool",
             )
 
-            messages = [{"role": "user", "content": prompt}]
+            messages = [Message(role="user", content=prompt)]
 
             response = self.llm.invoke(messages, **kwargs)
 
-            return response
+            if "[FINAL_ANSWER]" in response:
+                print(f"👌 {self.name} have completed execution.")
+                final_answer = response.split("[FINAL_ANSWER]")[1].split("```")[0]
+            else:
+                print(f"⚠️ {self.name} response might be incomplete.")
+                final_answer = response
+
+            return final_answer
 
         return self._run_with_tools(user_input, **kwargs)
 
@@ -117,13 +124,13 @@ class TrivalAgent(Agent):
             tool_description=self.tools.get_tools_description() if self.tools else "No available tool",
         )
 
-        messages = [{"role": "user", "content": prompt}]
+        messages = [Message(role="user", content=prompt)]
         self._history.extend(messages)
 
         print(f"💡 === Agent {self.name} start answering problem ===")
 
         response = self.llm.invoke(messages, **kwargs)
-        self._history.extend([{"role": "assistant", "content": response}])
+        self._history.extend([Message(role="assistant", content=response)])
 
         i = 0
         while i < self.max_retries:
@@ -147,7 +154,7 @@ class TrivalAgent(Agent):
                     except Exception as e:
                         print(f"Error when calling tool {name}: {e}")
                 
-                tool_call_result = [{"role": "tool", "content": result}]
+                tool_call_result = [Message(role="tool", content=result)]
                 self._history.extend(tool_call_result)
             
             prompt = self.system_prompt.format(
@@ -156,13 +163,13 @@ class TrivalAgent(Agent):
                 tool_description=self.tools.get_tools_description() if self.tools else "No available tool",
             )
 
-            messages = [{"role": "user", "content": prompt}]
+            messages = [Message(role="user", content=prompt)]
 
             # print(prompt)
 
             self._history.extend(messages)
             response = self.llm.invoke(messages, **kwargs)
-            self._history.extend([{"role": "assistant", "content": response}])
+            self._history.extend([Message(role="assistant", content=response)])
 
             # print(f"step{i} response", response, "\n")
 
@@ -181,7 +188,7 @@ class TrivalAgent(Agent):
         entries = []
 
         for i, entry in enumerate(self._history): 
-            if entry["role"] != "user": # discard all system prompts
-                entries.append(f"{i}. {entry["role"]}: {entry["content"]}")
+            if entry.role != "user": # discard all system prompts
+                entries.append(f"{i}. {entry.role}: {entry.content}")
         
         return "\n".join(entries)
