@@ -1,3 +1,3 @@
 # TODO
 
-* Message class implementation
+* structured output

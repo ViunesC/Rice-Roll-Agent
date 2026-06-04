@@ -5,7 +5,9 @@
 # Future improvement: Async invoke
 
 import os
+import json
 
+from pydantic import BaseModel
 from openai import OpenAI
 from typing import Optional, Any, Iterator
 
@@ -15,6 +17,14 @@ MODELSCOPE_BASE_URL="https://api-inference.modelscope.cn/v1/"
 OPENAI_BASE_URL="https://api.openai.com/v1"
 ANTHROPIC_BASE_URL="https://api.anthropic.com/v1"
 AIHUBMIX_BASE_URL="https://aihubmix.com/v1"
+
+STRUCTURED_OUTPUT_INJECTION_PROMPT = """
+You should strictly output a string representing a JSON object. Do not give any explaination, extra symbols, etc.
+
+This is the structure of your JSON output:
+
+{output_format}
+"""
 
 class LLMClient:
 
@@ -48,20 +58,43 @@ class LLMClient:
             timeout=self.timeout
         )
 
-    def invoke(self, messages: list[Message], structured_output: bool = False, output_schema: Optional[dict[str, Any]] = None, **kwargs) -> str:
+    def invoke(self, messages: list[Message], structured_output: bool = False, output_schema: Optional[Any] = None, **kwargs) -> str | Optional[dict[str, Any]]:
         # print(f"DEBUG: {messages}")
+        injected_inst = ""
+
+        # structured output injection
+        if structured_output:
+            if not output_schema:
+                raise ValueError("`structured_output` was set to `True` but no output schema was passed in.")
+            
+            schema_str = ""
+
+            if isinstance(output_schema, str):
+                # TODO: validate str schema
+                schema_str = output_schema
+            elif issubclass(output_schema, BaseModel):
+                schema_str = json.dumps(output_schema.model_json_schema(), indent=2)
+            else:
+                raise TypeError(f"`output_schema` must be either a JSON-like string, or a pydantic model class. Given schema is a {type(output_schema)}")
+            
+            injected_inst += STRUCTURED_OUTPUT_INJECTION_PROMPT.format(output_format=schema_str)
+
+        system_prompt = Message(role="developer", content=injected_inst)
 
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
-                messages=[msg.to_dict() for msg in messages],
+                messages=[msg.to_dict() for msg in messages] + [system_prompt],
                 **kwargs
             )
 
             choice = response.choices[0]
             content = choice.message.content or ""
 
-            return content
+            if structured_output:
+                return self._parse_str_output(content)
+            else:
+                return content
         except Exception as e:
             print(f"Failed to call LLM: {e}") # TODO: replace w/ custom Exception
             return ""
@@ -169,3 +202,24 @@ class LLMClient:
             actual_api_key = input_api_key or os.getenv("LLM_API_KEY")
 
         return actual_api_key, actual_base_url
+    
+    def _parse_str_output(self, raw_output: str) -> Optional[Any]:
+        output = raw_output
+        if output.startswith("```"):
+            output = output.split("```")[1]
+        
+        if output.startswith("json"):
+            output = output.split("json")[1]
+        elif output.startswith("JSON"):
+            output = output.split("JSON")[1]
+        
+        if output.endswith("```"):
+            output = output.split("```")[0]
+        
+        obj = None
+        try:
+            obj = json.loads(output)
+        except Exception as e:
+            print(f"Something went wrong when parsing model response: {e}")
+        
+        return obj

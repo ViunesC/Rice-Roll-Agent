@@ -1,10 +1,20 @@
+import json
+from pydantic import BaseModel, Field
+
 from core.llm import LLMClient
+from core.message import Message
 from dotenv import load_dotenv
 from agents.trival import TrivalAgent
 from agents.plan_and_solve import PlanAndSolveAgent
 from agents.react import ReActAgent
 from agents.worker_evaluator import WorkerEvaluatorAgent
 from tools.concrete.internet_search import get_registry
+
+
+class foo(BaseModel):
+    x: int = Field(description="value of x")
+    y: int = Field(description="value of y")
+
 
 load_dotenv()
 
@@ -13,19 +23,21 @@ if __name__ == "__main__":
 
     # alex = TrivalAgent("Alex", llm_client, tools=get_registry())
     # question = "Could do a little 3-card Tarot prediction on my fortune?"
-    
+
     # print("\n", alex.run(question))
 
     # print(alex._dump_history())
 
     # humphrey = PlanAndSolveAgent("Humphrey", llm_client, tools=get_registry())
-    logic_task = "There are 4 vacant rooms in Hotel Mossuri on the first night. " \
-    "On the second day there 2 guests moved-in and occupied 1 room. Then on the same day there are 3 guests moved out" \
-    "and 2 rooms became vacant. On the third day there are a group of tourists arrived and taken 4 rooms, then there is a family" \
-    "moved out and a new room became empty. Question: How many vacant room are there on the fourth day?"
- 
+    logic_task = (
+        "There are 4 vacant rooms in Hotel Mossuri on the first night. "
+        "On the second day there 2 guests moved-in and occupied 1 room. Then on the same day there are 3 guests moved out"
+        "and 2 rooms became vacant. On the third day there are a group of tourists arrived and taken 4 rooms, then there is a family"
+        "moved out and a new room became empty. Question: How many vacant room are there on the fourth day?"
+    )
+
     tool_calling_task = "Analyze the TV drama 'The Wire'. What are some of its significances in terms of plot and character design? How it critique on modern American politics and society?"
-    # print("\n", humphrey.run(tool_calling_task))
+    # print("\n", humphrey.run(logic_task))
     # print(humphrey._dump_history())
 
     # jackson = ReActAgent("Jackson", llm_client, tools=get_registry(), max_iterations=8)
@@ -33,7 +45,23 @@ if __name__ == "__main__":
     # print("\n\n ============= Agent history =============")
     # print(jackson._dump_history())
 
-    old_billy = WorkerEvaluatorAgent("Old Billy", llm_client, tools=get_registry())
-    print("\n", old_billy.run(tool_calling_task))
-    print("\n\n ============= Agent history =============")
-    print(old_billy._dump_history())
+    # old_billy = WorkerEvaluatorAgent("Old Billy", llm_client, tools=get_registry())
+    # print("\n", old_billy.run(tool_calling_task))
+    # print("\n\n ============= Agent history =============")
+    # print(old_billy._dump_history())
+
+    # alice = TrivalAgent("Alice", llm=llm_client, tools=get_registry())
+    # print(alice.run(tool_calling_task))
+
+    print(
+        llm_client.invoke(
+            [
+                Message(
+                    role="user",
+                    content="Give me two integers that are both prime numbers and sum up to 60.",
+                )
+            ],
+            structured_output=True,
+            output_schema=foo,
+        )
+    )
