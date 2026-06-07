@@ -1,4 +1,5 @@
 # message handling
+import json
 
 from typing import Literal, Any
 from pydantic import BaseModel
@@ -13,10 +14,10 @@ class Message(BaseModel):
     timestamp: datetime
     metadata: dict[str, Any] = {}
 
-    def __init__(self, role: MessageRole, content: str, **kwargs):
+    def __init__(self, role: MessageRole, content: str | dict, **kwargs):
         super().__init__(
             role=role,
-            content=content,
+            content=content if isinstance(content, str) else json.dumps(content),
             timestamp=kwargs.get("timestamp") or datetime.now(),
             metadata=kwargs.get("metadata") or {},
         )
