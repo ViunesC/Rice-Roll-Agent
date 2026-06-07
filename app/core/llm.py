@@ -21,7 +21,7 @@ AIHUBMIX_BASE_URL="https://aihubmix.com/v1"
 STRUCTURED_OUTPUT_INJECTION_PROMPT = """
 You should strictly output a string representing a JSON object. Do not give any explaination, extra symbols, etc.
 
-This is the structure of your JSON output:
+This is the schema of your JSON output, only served as structural reference. You should learn and write your own JSON:
 
 {output_format}
 """
