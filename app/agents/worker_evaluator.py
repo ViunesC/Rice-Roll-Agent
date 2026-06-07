@@ -3,6 +3,7 @@ import ast
 import json
 import re
 from typing import Optional, Any
+from pydantic import BaseModel, Field
 
 from core.agent import Agent
 from core.config import Config
@@ -68,19 +69,17 @@ You should evaluate the quality of the answer based on following rules:
 1. Evaluate the logical coherence and the soundness of argument.
 2. If the response looks legitimate, challenge it by considering from different perspective, and edge cases that are reasonable but niche.
 3. Don't go too far and ask the answer to be perfect. It only need to be generally acceptable and correct.
-
-After evaluation, you NEED to respond strictly with valid JSON in the following format, where `need_rework` is true when you ask for rework, and `feedback` is a JSON string:
-Do not forget `[OUTPUT]` tag.
-
-[OUTPUT]```
-{{
-    "need_rework": <boolean>,
-    "feedback": "<str>"
-}}
-```
-
-Now evaluate the response:
 """
+
+
+class EvaluatorResponseSchema(BaseModel):
+    need_rework: bool = Field(
+        title="need_rework",
+        description="Whether or not worker should revise their response",
+        default=False,
+    )
+    feedback: str = Field(title="feedback", description="Your feedback", default="")
+
 
 class WorkerEvaluatorAgent(Agent):
     def __init__(
@@ -131,17 +130,23 @@ class WorkerEvaluatorAgent(Agent):
 
         print(f"⚙️ ======== Worker {self.name} start working on the task ========")
         response = self._work(user_input, **kwargs)
-        
+
         i = 0
         while i < self.max_steps:
-            print(f"🥸 ======== Evalutor {self.name} is evaluating the previous attempt on task ========")
+            print(
+                f"🥸 ======== Evalutor {self.name} is evaluating the previous attempt on task ========"
+            )
             eval_result = self._evaluate(user_input, response, **kwargs)
 
             if not eval_result["need_rework"]:
-                print(f"🀄️ ======== Evalutor {self.name} accepted the previous attempt========")
+                print(
+                    f"🀄️ ======== Evalutor {self.name} accepted the previous attempt========"
+                )
                 break
-            
-            print(f"🥺 ======== Worker {self.name} receives the feedback and start reworking========")
+
+            print(
+                f"🥺 ======== Worker {self.name} receives the feedback and start reworking========"
+            )
             feedback = feedback_template.format(feedback=eval_result["feedback"])
             response = self._work(user_input, feedback, **kwargs)
 
@@ -163,7 +168,7 @@ class WorkerEvaluatorAgent(Agent):
             if self.tools
             else "No available tool",
             last_attempt=self._dump_last_attempt(),
-            feedback=feedback if feedback else ""
+            feedback=feedback if feedback else "",
         )
 
         messages = [Message(role="user", content=prompt)]
@@ -173,7 +178,15 @@ class WorkerEvaluatorAgent(Agent):
         response = ""
         while i < self.max_retries:
             response = self.llm.invoke(messages, **kwargs)
-            self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "worker"})])
+            self._history.extend(
+                [
+                    Message(
+                        role="assistant",
+                        content=response,
+                        metadata={"subagent_type": "worker"},
+                    )
+                ]
+            )
 
             if "[TOOL]" in response:
                 tool_calling = response.split("[TOOL](")[1].split(")")[0].split(":", 1)
@@ -200,8 +213,17 @@ class WorkerEvaluatorAgent(Agent):
                 self._history.extend(tool_call_result)
 
                 if i == self.max_retries - 1:
-                    print("⚠️ Maximum tool call retry amount reached. The final tool call might be incomplete.")
-                    self._history.extend([Message(role="tool", content="Maximum tool call retry reached. The attempt on previous step might be incomplete/failed.")])
+                    print(
+                        "⚠️ Maximum tool call retry amount reached. The final tool call might be incomplete."
+                    )
+                    self._history.extend(
+                        [
+                            Message(
+                                role="tool",
+                                content="Maximum tool call retry reached. The attempt on previous step might be incomplete/failed.",
+                            )
+                        ]
+                    )
 
                 prompt = self.worker_promopt.format(
                     task=task,
@@ -209,7 +231,7 @@ class WorkerEvaluatorAgent(Agent):
                     if self.tools
                     else "No available tool",
                     last_attempt=self._dump_last_attempt(),
-                    feedback=feedback if feedback else ""
+                    feedback=feedback if feedback else "",
                 )
 
                 messages = [Message(role="user", content=prompt)]
@@ -222,169 +244,52 @@ class WorkerEvaluatorAgent(Agent):
         return response
 
     def _evaluate(self, task: str, last_attempt: str, **kwargs) -> dict[str, Any]:
-        prompt = self.evaluator_promopt.format(
-            task=task,
-            last_attempt=last_attempt
-        )
+        prompt = self.evaluator_promopt.format(task=task, last_attempt=last_attempt)
         messages = [Message(role="user", content=prompt)]
         self._history.extend(messages)
 
-        response = self.llm.invoke(messages, **kwargs)
-        self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "evaluator"})])
+        response = self.llm.invoke(
+            messages,
+            structured_output=True,
+            output_schema=EvaluatorResponseSchema,
+            **kwargs,
+        )
+        self._history.extend(
+            [
+                Message(
+                    role="assistant",
+                    content=response,
+                    metadata={"subagent_type": "evaluator"},
+                )
+            ]
+        )
 
-        # TODO: implement structured output in llm client
-        raw_output = self._parse_output_payload(response)
-        output = self._load_output_payload(raw_output)
-
-        if isinstance(output, dict) and "need_rework" in output:
-            output["need_rework"] = self._coerce_bool(output["need_rework"])
-            output["feedback"] = output.get("feedback", "")
-
-            if output["need_rework"]:
-                print(f"✅ Evaluator {self.name} evaluated the work and provided feedback.")
+        if isinstance(response, dict) and "need_rework" in response:
+            if response["need_rework"]:
+                print(
+                    f"✅ Evaluator {self.name} evaluated the work and provided feedback."
+                )
             else:
                 print(f"✅ Evaluator {self.name} evaluated the work and accepted it.")
 
-            return output
-        
-        raise Exception(f"❌ Something went wrong during evaluation: evaluator returned empty/invalid response. The evalutor response is {response}")
+            return response
 
-    def _parse_output_payload(self, response: str) -> str:
-        if "[OUTPUT]" not in response:
-            raise Exception(
-                f"❌ Something went wrong during evaluation: missing [OUTPUT] marker. The evalutor response is {response}"
-            )
-
-        output_section = response.split("[OUTPUT]", 1)[1].strip()
-
-        if "```" in output_section:
-            output_section = output_section.split("```", 2)[1].strip()
-
-        for language_tag in ("python", "json"):
-            if output_section.lower().startswith(language_tag):
-                output_section = output_section[len(language_tag):].strip()
-                break
-
-        return output_section
-
-    def _load_output_payload(self, raw_output: str) -> Any:
-        for parser in (json.loads, ast.literal_eval):
-            try:
-                return parser(raw_output)
-            except (json.JSONDecodeError, SyntaxError, ValueError):
-                pass
-
-        normalized_output = self._normalize_json_scalars_for_literal_eval(raw_output)
-        try:
-            return ast.literal_eval(normalized_output)
-        except (SyntaxError, ValueError):
-            pass
-
-        relaxed_output = self._load_relaxed_output_payload(raw_output)
-        if relaxed_output is not None:
-            return relaxed_output
-
-        raise ValueError(f"Evaluator returned invalid output payload: {raw_output}")
-
-    def _normalize_json_scalars_for_literal_eval(self, raw_output: str) -> str:
-        replacements = {
-            "true": "True",
-            "false": "False",
-            "null": "None",
-        }
-
-        normalized = raw_output
-        for json_value, python_value in replacements.items():
-            normalized = re.sub(
-                rf"(?P<prefix>['\"]?need_rework['\"]?\s*:\s*){json_value}\b",
-                lambda match: f"{match.group('prefix')}{python_value}",
-                normalized,
-                flags=re.IGNORECASE,
-            )
-
-        return normalized
-
-    def _load_relaxed_output_payload(self, raw_output: str) -> Optional[dict[str, Any]]:
-        need_rework = self._extract_scalar_value(raw_output, "need_rework")
-        if need_rework is None:
-            return None
-
-        feedback = self._extract_text_value(raw_output, "feedback") or ""
-        return {"need_rework": need_rework, "feedback": feedback}
-
-    def _extract_scalar_value(self, raw_output: str, key: str) -> Optional[str]:
-        match = re.search(
-            rf"['\"]?{re.escape(key)}['\"]?\s*:\s*(?P<value>[^,\n}}]+)",
-            raw_output,
-        )
-        if not match:
-            return None
-
-        return self._strip_wrapping_quotes(match.group("value").strip())
-
-    def _extract_text_value(self, raw_output: str, key: str) -> Optional[str]:
-        match = re.search(
-            rf"['\"]?{re.escape(key)}['\"]?\s*:\s*(?P<quote>['\"])(?P<value>.*)(?P=quote)\s*,?\s*\}}?\s*$",
-            raw_output,
-            flags=re.DOTALL,
-        )
-        if match:
-            return self._unescape_common_sequences(match.group("value"))
-
-        match = re.search(
-            rf"['\"]?{re.escape(key)}['\"]?\s*:\s*(?P<value>.*)\s*\}}?\s*$",
-            raw_output,
-            flags=re.DOTALL,
-        )
-        if not match:
-            return None
-
-        return self._strip_wrapping_quotes(match.group("value").strip().rstrip(","))
-
-    def _strip_wrapping_quotes(self, value: str) -> str:
-        if len(value) >= 6 and value[:3] in ("'''", '"""') and value.endswith(value[:3]):
-            return self._unescape_common_sequences(value[3:-3])
-
-        if len(value) >= 2 and value[0] in ("'", '"') and value.endswith(value[0]):
-            return self._unescape_common_sequences(value[1:-1])
-
-        return self._unescape_common_sequences(value)
-
-    def _unescape_common_sequences(self, value: str) -> str:
-        return (
-            value.replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\t", "\t")
-            .replace("\\'", "'")
-            .replace('\\"', '"')
+        raise Exception(
+            f"❌ Something went wrong during evaluation: evaluator returned empty/invalid response. The evalutor response is {response}"
         )
 
-    def _coerce_bool(self, value: Any) -> bool:
-        if isinstance(value, bool):
-            return value
-
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in ("true", "yes", "1"):
-                return True
-            if normalized in ("false", "no", "0", ""):
-                return False
-
-        return bool(value)
-
-    
     def _dump_history(self) -> str:
         entries = []
 
-        for i, entry in enumerate(self._history): 
-            if entry["role"] != "user": # discard all system prompts
+        for i, entry in enumerate(self._history):
+            if entry["role"] != "user":  # discard all system prompts
                 entries.append(f"{i}. {entry['role']}: {entry['content']}")
-        
+
         return "\n".join(entries) if entries else ""
-    
+
     def _dump_last_attempt(self) -> str:
         for entry in reversed(self._history):
             if entry["role"] == "assistant" and entry["subagent_type"] == "worker":
-                return f"Assistant: {entry["content"]}"
-        
+                return f"Assistant: {entry['content']}"
+
         return ""

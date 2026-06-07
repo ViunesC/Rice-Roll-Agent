@@ -1,6 +1,7 @@
 # Plan and solve agent
 import ast
 from typing import Optional, Any
+from pydantic import BaseModel, Field
 
 from core.agent import Agent
 from core.config import Config
@@ -28,23 +29,12 @@ Rules:
 - Do not solve the task yourself unless the plan would be a single direct answer step.
 - Keep the plan compact, ordered, and specific enough for another agent to execute.
 - Include tool use in the plan only when it is actually useful.
-- Your response must contain either one tool call or one plan, never both.
-- The plan must be a plain Python list of strings inside an unlabelled code block.
+- Your response must contain either one tool call or one plan, never both. No extra explaination.
+- The plan must be a JSON containing plain Python list of strings inside an unlabelled code block.
 
 Tool call format:
 ```
 [TOOL](ToolName:param1='value',param2=1,param3=False)
-```
-
-Plan format:
-[PLAN]
-```
-[
-    "First concrete step",
-    "Second concrete step",
-    ...more steps here...
-    "Final step that produces the answer for the user"
-]
 ```
 """
 
@@ -74,9 +64,14 @@ Rules:
 
 Tool call format:
 ```
-[TOOL](ToolName:param1='value',param2=1,param3=False)
+[TOOL](TOOLNAMEHERE:param1='value',param2=1,param3=False)
 ```
 """
+
+
+class PlannerReturnSchema(BaseModel):
+    plan: list[str] = Field(title="plan", description="the list of steps", default=[])
+
 
 class PlanAndSolveAgent(Agent):
     def __init__(
@@ -150,50 +145,52 @@ class PlanAndSolveAgent(Agent):
             history=self._dump_history(),
         )
 
-        messages =  [Message(role="user", content=prompt)]
+        messages = [Message(role="user", content=prompt)]
         self._history.extend(messages)
 
         print(f"🧠 ====Planner {self.name} start to draft a plan.====")
-        response = self.llm.invoke(messages, **kwargs)
+        response = self.llm.invoke(messages, structured_output=True, output_schema=PlannerReturnSchema, **kwargs)
+        self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "planner"})])
 
         i = 0
         no_inst_given = False
         while i < max_iterations:
-            if "[PLAN]" in response:
+            if isinstance(response, dict):
                 break
-            elif "[TOOL]" in response:
-                tool_calling = response.split("[TOOL](")[1].split(")")[0].split(":")
-                name, parameters_str = tool_calling[0], tool_calling[1]
-
-                result = ""
-
-                if not self.tools:
-                    print(
-                        f"❌ Error when calling tool {name}: there is no tool registry binded to agent."
-                    )
-                elif not self.tools.contains(name):
-                    print(
-                        f"❌ Error when calling tool {name}: tool does not exist in registry."
-                    )
-                else:
-                    try:
-                        result = self.tools.execute(name, parameters_str)
-                        # print("tool call result", result)
-                    except Exception as e:
-                        print(f"Error when calling tool {name}: {e}")
-
-                tool_call_result = [Message(role="tool", content=result)]
-                self._history.extend(tool_call_result)
             else:
-                no_inst_given = True
-            
+                if response and "[TOOL]" in response:
+                    tool_calling = response.split("[TOOL](")[1].split(")")[0].split(":")
+                    name, parameters_str = tool_calling[0], tool_calling[1]
+
+                    result = ""
+
+                    if not self.tools:
+                        print(
+                            f"❌ Error when calling tool {name}: there is no tool registry binded to agent."
+                        )
+                    elif not self.tools.contains(name):
+                        print(
+                            f"❌ Error when calling tool {name}: tool does not exist in registry."
+                        )
+                    else:
+                        try:
+                            result = self.tools.execute(name, parameters_str)
+                            # print("tool call result", result)
+                        except Exception as e:
+                            print(f"Error when calling tool {name}: {e}")
+
+                    tool_call_result = [Message(role="tool", content=result)]
+                    self._history.extend(tool_call_result)
+                else:
+                    no_inst_given = True
+
             prompt = self.planner_promopt.format(
                 task=task,
                 tool_description=self.tools.get_tools_description()
                 if self.tools
                 else "No available tool",
                 max_steps=str(self.max_steps),
-                history=self._dump_history()
+                history=self._dump_history(),
             )
 
             if no_inst_given:
@@ -203,42 +200,54 @@ class PlanAndSolveAgent(Agent):
             self._history.extend(messages)
 
             # print(prompt)
-            response = self.llm.invoke(messages, **kwargs)
-            self._history.extend([Message(role="assistant", content=response)])
+            response = self.llm.invoke(messages, structured_output=True, output_schema=PlannerReturnSchema, **kwargs)
+            self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "planner"})])
 
             i += 1
 
-        self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "planner"})])
-        
-        # extract plan
-        raw_plan = response.split("[PLAN]")[1].split("```")[1].split("```")[0].strip()
-        plan = ast.literal_eval(raw_plan)
+        self._history.extend(
+            [
+                Message(
+                    role="assistant",
+                    content=response,
+                    metadata={"subagent_type": "planner"},
+                )
+            ]
+        )
 
-        if plan and isinstance(plan, list):
+        # extract plan
+        if response and response.get("plan", []):
             print(f"✅ Planner {self.name} have drafted a plan.")
-            return plan
-        else:
-            return []
+        
+        return response.get("plan")
 
     def _solve(self, task: str, plan: list[str], **kwargs) -> str:
         print(f"⚙️ ====Solver {self.name} start executing the plan.====")
 
         response = ""
-        
+
         for i, step in enumerate(plan):
             prompt = self.solver_promopt.format(
                 task=task,
-                step=f"Step {i+1}: {step}",
+                step=f"Step {i + 1}: {step}",
                 tool_description=self.tools.get_tools_description()
                 if self.tools
                 else "No available tool",
-                history=self._dump_prev_steps()
+                history=self._dump_prev_steps(),
             )
             messages = [Message(role="user", content=prompt)]
             self._history.extend(messages)
 
             response = self.llm.invoke(messages, **kwargs)
-            self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "solver"})])
+            self._history.extend(
+                [
+                    Message(
+                        role="assistant",
+                        content=response,
+                        metadata={"subagent_type": "solver"},
+                    )
+                ]
+            )
 
             j = 0
             while "[TOOL]" in response and j < self.max_retries:
@@ -267,11 +276,11 @@ class PlanAndSolveAgent(Agent):
 
                 prompt = self.solver_promopt.format(
                     task=task,
-                    step=f"Step {i+1}: {step}",
+                    step=f"Step {i + 1}: {step}",
                     tool_description=self.tools.get_tools_description()
                     if self.tools
                     else "No available tool",
-                    history=self._dump_prev_steps()
+                    history=self._dump_prev_steps(),
                 )
 
                 messages = [Message(role="user", content=prompt)]
@@ -280,41 +289,62 @@ class PlanAndSolveAgent(Agent):
 
                 self._history.extend(messages)
                 response = self.llm.invoke(messages, **kwargs)
-                self._history.extend([Message(role="assistant", content=response, metadata={"subagent_type": "solver"})])
+                self._history.extend(
+                    [
+                        Message(
+                            role="assistant",
+                            content=response,
+                            metadata={"subagent_type": "solver"},
+                        )
+                    ]
+                )
 
                 j += 1
-            
+
             if j == self.max_retries:
-                print("⚠️ Maximum tool call retry amount reached. The final tool call might be incomplete.")
-                self._history.extend([Message(role="tool", content="Maximum tool call retry reached. The attempt on previous step might be incomplete/failed.")])
+                print(
+                    "⚠️ Maximum tool call retry amount reached. The final tool call might be incomplete."
+                )
+                self._history.extend(
+                    [
+                        Message(
+                            role="tool",
+                            content="Maximum tool call retry reached. The attempt on previous step might be incomplete/failed.",
+                        )
+                    ]
+                )
 
         final_response = response
-        
+
         if not final_response:
-            print("❌ Something went wrong when executing plan. No final response was given.")
+            print(
+                "❌ Something went wrong when executing plan. No final response was given."
+            )
         elif "[TOOL]" in final_response:
             print("😵 Leftover tool call detected. Final response might be incomplete.")
             return final_response.split("[TOOL]")[0]
 
         return final_response
 
-    
     def _dump_history(self) -> str:
         entries = []
 
-        for i, entry in enumerate(self._history): 
-            if entry.role != "user": # discard all system prompts
+        for i, entry in enumerate(self._history):
+            if entry.role != "user":  # discard all system prompts
                 entries.append(f"{i}. {entry.role}: {entry.content}")
-        
+
         return "\n".join(entries) if entries else ""
-    
+
     def _dump_prev_steps(self) -> str:
         entries = []
 
-        for i, entry in enumerate(self._history): 
-            if entry.role == "assistant" and entry.metadata.get("subagent_type", "") == "solver": # discard all system prompts
+        for i, entry in enumerate(self._history):
+            if (
+                entry.role == "assistant"
+                and entry.metadata.get("subagent_type", "") == "solver"
+            ):  # discard all system prompts
                 entries.append(f"{i}. {entry.role}: {entry.content}")
             elif entry.role == "tool":
                 entries.append(f"{i}. Toolcalling result: {entry.content}")
-        
+
         return "\n".join(entries) if entries else ""
