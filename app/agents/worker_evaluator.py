@@ -282,14 +282,14 @@ class WorkerEvaluatorAgent(Agent):
         entries = []
 
         for i, entry in enumerate(self._history):
-            if entry["role"] != "user":  # discard all system prompts
-                entries.append(f"{i}. {entry['role']}: {entry['content']}")
+            if entry.role != "user":  # discard all system prompts
+                entries.append(f"{i}. {entry.role}: {entry.content}")
 
         return "\n".join(entries) if entries else ""
 
     def _dump_last_attempt(self) -> str:
         for entry in reversed(self._history):
-            if entry["role"] == "assistant" and entry["subagent_type"] == "worker":
-                return f"Assistant: {entry['content']}"
+            if entry.role == "assistant" and entry.metadata["subagent_type"] == "worker":
+                return f"Assistant: {entry.content}"
 
         return ""
