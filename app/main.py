@@ -37,7 +37,8 @@ if __name__ == "__main__":
     )
 
     tool_calling_task = "Analyze the TV drama 'The Wire'. What are some of its significances in terms of plot and character design? How it critique on modern American politics and society?"
-    # print("\n", humphrey.run(logic_task))
+    # print("\n", humphrey.run(tool_calling_task))
+    # print("==================== Histories: =======================")
     # print(humphrey._dump_history())
 
     # jackson = ReActAgent("Jackson", llm_client, tools=get_registry(), max_iterations=8)
@@ -45,23 +46,23 @@ if __name__ == "__main__":
     # print("\n\n ============= Agent history =============")
     # print(jackson._dump_history())
 
-    # old_billy = WorkerEvaluatorAgent("Old Billy", llm_client, tools=get_registry())
-    # print("\n", old_billy.run(tool_calling_task))
-    # print("\n\n ============= Agent history =============")
-    # print(old_billy._dump_history())
+    old_billy = WorkerEvaluatorAgent("Old Billy", llm_client, tools=get_registry())
+    print("\n", old_billy.run(tool_calling_task))
+    print("\n\n ============= Agent history =============")
+    print(old_billy._dump_history())
 
     # alice = TrivalAgent("Alice", llm=llm_client, tools=get_registry())
     # print(alice.run(tool_calling_task))
 
-    print(
-        llm_client.invoke(
-            [
-                Message(
-                    role="user",
-                    content="Give me two integers that are both prime numbers and sum up to 60.",
-                )
-            ],
-            structured_output=True,
-            output_schema=foo,
-        )
-    )
+    # print(
+    #     llm_client.invoke(
+    #         [
+    #             Message(
+    #                 role="user",
+    #                 content="Give me two integers that are both prime numbers and sum up to 60.",
+    #             )
+    #         ],
+    #         structured_output=True,
+    #         output_schema=foo,
+    #     )
+    # )
